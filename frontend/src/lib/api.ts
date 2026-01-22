@@ -155,7 +155,14 @@ export async function createLike(
 
 export async function getUsers(): Promise<User[]> {
   const response = await fetch(`${API_URL}/api/auth/users`)
-  if (!response.ok) throw new Error('Error obteniendo usuarios')
+  if (!response.ok) {
+    // Si es 404 o el servidor no responde, devolver array vacío en lugar de error
+    if (response.status === 404) {
+      console.warn('Endpoint de usuarios no encontrado, devolviendo lista vacía')
+      return []
+    }
+    throw new Error(`Error obteniendo usuarios: ${response.status} ${response.statusText}`)
+  }
   return response.json()
 }
 

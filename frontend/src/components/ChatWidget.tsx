@@ -82,10 +82,12 @@ export default function ChatWidget() {
     try {
       const usersList = await getUsers()
       // Filtrar el usuario actual
-      const filteredUsers = usersList.filter(user => user.email !== currentUserEmail)
+      const filteredUsers = (usersList || []).filter(user => user.email !== currentUserEmail)
       setUsers(filteredUsers)
     } catch (error) {
       console.error('Error cargando usuarios:', error)
+      // En caso de error, establecer lista vacía
+      setUsers([])
     }
   }
 

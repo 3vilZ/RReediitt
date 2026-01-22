@@ -43,9 +43,11 @@ export default function Header() {
   const loadUsers = async () => {
     try {
       const usersList = await getUsers()
-      setUsers(usersList)
+      setUsers(usersList || [])
     } catch (error) {
       console.error('Error cargando usuarios:', error)
+      // En caso de error, establecer lista vacía para evitar problemas
+      setUsers([])
     }
   }
 
