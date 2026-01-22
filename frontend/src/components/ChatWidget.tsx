@@ -17,6 +17,7 @@ export default function ChatWidget() {
   const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false)
+  const [checkingAuth, setCheckingAuth] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const userDropdownRef = useRef<HTMLDivElement>(null)
@@ -25,6 +26,7 @@ export default function ChatWidget() {
   const currentUserEmailRef = useRef<string | null>(null)
 
   useEffect(() => {
+    console.log('[ChatWidget] Componente montado, verificando usuario...')
     checkUser()
   }, [])
 
@@ -73,8 +75,23 @@ export default function ChatWidget() {
   }, [isUserDropdownOpen])
 
   const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    setCurrentUserEmail(user?.email || null)
+    try {
+      console.log('[ChatWidget] Verificando autenticación...')
+      const { data: { user }, error } = await supabase.auth.getUser()
+      if (error) {
+        console.error('[ChatWidget] Error obteniendo usuario:', error)
+        setCurrentUserEmail(null)
+      } else {
+        console.log('[ChatWidget] Usuario encontrado:', user?.email || 'ninguno')
+        setCurrentUserEmail(user?.email || null)
+      }
+    } catch (error) {
+      console.error('[ChatWidget] Error verificando usuario:', error)
+      setCurrentUserEmail(null)
+    } finally {
+      setCheckingAuth(false)
+      console.log('[ChatWidget] Verificación de autenticación completada')
+    }
   }
 
   const loadUsers = async () => {
@@ -171,20 +188,23 @@ export default function ChatWidget() {
   useEffect(() => {
     if (!currentUserEmailRef.current) return
 
-    console.log('[ChatWidget] Configurando suscripción Realtime para:', currentUserEmailRef.current)
+    const userEmail = currentUserEmailRef.current
+    console.log('[ChatWidget] Configurando suscripción Realtime para:', userEmail)
 
+    // Crear un canal único para este usuario
+    const channelName = `messages-${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`
     const channel = supabase
-      .channel(`messages-${currentUserEmailRef.current}`)
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
-          filter: `receiver_email=eq.${currentUserEmailRef.current}`,
+          filter: `receiver_email=eq.${userEmail}`,
         },
         async (payload) => {
-          console.log('[ChatWidget] Mensaje recibido:', payload.new)
+          console.log('[ChatWidget] Mensaje recibido vía Realtime:', payload.new)
           const newMessage = payload.new
           
           // Actualizar conteo de no leídos
@@ -198,7 +218,7 @@ export default function ChatWidget() {
             
             // Marcar como leído
             try {
-              await markMessageAsRead(newMessage.id, currentUserEmailRef.current!)
+              await markMessageAsRead(newMessage.id, userEmail)
             } catch (error) {
               console.error('Error marcando mensaje como leído:', error)
             }
@@ -214,10 +234,10 @@ export default function ChatWidget() {
           event: 'INSERT',
           schema: 'public',
           table: 'messages',
-          filter: `sender_email=eq.${currentUserEmailRef.current}`,
+          filter: `sender_email=eq.${userEmail}`,
         },
         async (payload) => {
-          console.log('[ChatWidget] Mensaje enviado:', payload.new)
+          console.log('[ChatWidget] Mensaje enviado vía Realtime:', payload.new)
           const newMessage = payload.new
           
           // Verificar si estamos viendo la conversación con el destinatario
@@ -228,19 +248,25 @@ export default function ChatWidget() {
           }
         }
       )
-      .subscribe((status) => {
+      .subscribe((status, err) => {
         console.log('[ChatWidget] Estado de suscripción:', status)
         if (status === 'SUBSCRIBED') {
-          console.log('[ChatWidget] Suscripción activa')
+          console.log('[ChatWidget] Suscripción Realtime activa correctamente')
         } else if (status === 'CHANNEL_ERROR') {
-          console.error('[ChatWidget] Error en el canal de Realtime')
+          console.error('[ChatWidget] Error en el canal de Realtime:', err)
+        } else if (status === 'TIMED_OUT') {
+          console.error('[ChatWidget] Timeout en la suscripción Realtime')
+        } else if (status === 'CLOSED') {
+          console.warn('[ChatWidget] Canal de Realtime cerrado')
         }
       })
 
     // Cleanup: remover el canal cuando el componente se desmonte o cambien las dependencias
     return () => {
       console.log('[ChatWidget] Limpiando suscripción Realtime')
-      supabase.removeChannel(channel)
+      if (channel) {
+        supabase.removeChannel(channel)
+      }
     }
   }, [currentUserEmail]) // Solo recrear cuando cambie currentUserEmail
 
@@ -295,7 +321,19 @@ export default function ChatWidget() {
     return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
   }
 
-  if (!currentUserEmail) return null
+  // No mostrar nada mientras se verifica la autenticación
+  if (checkingAuth) {
+    console.log('[ChatWidget] Esperando verificación de autenticación...')
+    return null
+  }
+
+  // Si no hay usuario autenticado, no mostrar el chat
+  if (!currentUserEmail) {
+    console.log('[ChatWidget] No hay usuario autenticado, no se muestra el chat')
+    return null
+  }
+
+  console.log('[ChatWidget] Renderizando chat para usuario:', currentUserEmail)
 
   return (
     <>
